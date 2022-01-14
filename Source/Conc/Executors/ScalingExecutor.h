@@ -17,8 +17,6 @@ namespace Internal::Executor {
 
         ~ScalingExecutor() {
             Enqueue([this]()noexcept {
-                printf("Task final\n");
-                fflush(stdout);
                 // notify the underlying queue to join all non-executor que
                 mDrainer.Finalize();
                 // tell the executors that they should join after finishing whatever they are doing
@@ -66,7 +64,7 @@ namespace Internal::Executor {
 
         void Spawn() {
             std::thread([this]()noexcept {
-                while (mRun) {
+                do {
                     mDrainer.Drain();
                     if (mRun) continue;
                     if (Rest()) continue;
@@ -77,7 +75,7 @@ namespace Internal::Executor {
                     // the executor has been commanded to stop. as stop is set by the last added task,
                     // all tasks added before should be already drained.
                     if (mTotal == 0) mFinal.Signal(); // this is the last thread. notify final
-                }
+                } while(mRun);
                 // this is not a scale down operation, we need to check the counter and notify final
                 if (mTotal.fetch_sub(1) == 1) mFinal.Signal(); // this is the last thread. notify final
             }).detach();

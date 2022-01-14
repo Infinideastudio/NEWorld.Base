@@ -6,6 +6,7 @@
 #include "WorkStealingQueue.h"
 
 namespace Internal::Executor {
+    // TODO(improve the design. The current implementation is slow as hell)
     template<class Task>
     class BagQueue {
         class Context : public WorkStealingQueue<Task> {
