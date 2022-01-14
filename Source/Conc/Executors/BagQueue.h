@@ -12,7 +12,7 @@ namespace Internal::Executor {
         public:
             std::atomic<Context *> Next{nullptr};
 
-            Context* FinalizationAlternativeQueue{nullptr};
+            Context *FinalizationAlternativeQueue{nullptr};
 
             bool Use() { return !mUsed.exchange(true); }
 
@@ -23,16 +23,26 @@ namespace Internal::Executor {
         };
 
     public:
+        ~BagQueue() {
+            std::lock_guard lk{mLocalLock};
+            for (auto it = mListHead.load(); it;) {
+                const auto release = it;
+                it = it->Next;
+                if (!release->empty()) std::abort();
+                delete release;
+            }
+        }
+
         void Add(const Task &item) { WriteContext()->push(item); }
 
         [[nodiscard]] Task Get() noexcept {
             const auto ctx = ReadContext();
             if (auto local = ctx->pop(); local) return *std::move(local);
             if (mFinal) {
-                auto& alt = ctx->FinalizationAlternativeQueue;
+                auto &alt = ctx->FinalizationAlternativeQueue;
                 for (;;) {
                     if (!alt) FinalizationSelectQueue();
-                    if (!alt) continue; // no more external abandoned queues need to be collected
+                    if (!alt) break; // no more external abandoned queues need to be collected
                     if (auto local = alt->pop(); local) return *std::move(local);
                     alt = nullptr; // if current alt queue fails, we clear the field without removing lock
                 }
@@ -50,17 +60,19 @@ namespace Internal::Executor {
             {
                 // remove the tss storage for external threads to reset queue status
                 auto scoped = std::move(mListTss);
-                (void)scoped;
+                (void) scoped;
             }
             mFinal.store(true);
         }
+
     private:
         std::atomic_bool mFinal;
         Lock<SpinLock> mLocalLock;
         std::atomic<Context *> mListHead = nullptr;
         Context *mListTail = nullptr;
-        tss::pointer<Context, void> mListTss
-                {[](void *p, void *) noexcept { if (p) reinterpret_cast<Context *>(p)->Reset(); }, nullptr};
+        tss::pointer<Context, void> mListTss{&LooseReset, nullptr};
+
+        static void LooseReset(void *p, void *) noexcept { if (p) reinterpret_cast<Context *>(p)->Reset(); }
 
         Context *AssignList() {
             std::lock_guard lk{mLocalLock};
@@ -69,7 +81,7 @@ namespace Internal::Executor {
             // add a new list if recycling failed
             const auto newList = new Context();
             if (mListTail) mListTail->Next = newList; else mListHead = newList;
-            return mListTail = newList;
+            return (newList->Use(), mListTail = newList);
         }
 
         Context *FinalizationSelectQueue() {
@@ -112,7 +124,7 @@ namespace Internal::Executor {
             return (mListTss.reset(newList), newList);
         }
 
-        std::optional<Task> Steal(Context * ctx) {
+        std::optional<Task> Steal(Context *ctx) {
             for (auto it = mListHead.load(); it; it = it->Next) {
                 if (it == ctx) continue;
                 if (auto r = it->steal(); r) return r;

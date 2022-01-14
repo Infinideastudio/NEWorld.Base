@@ -67,7 +67,7 @@ namespace tss::internal {
             temp::vector<void *> storage;
             const auto cleanup = m_cleanups[key];
             m_cleanups[key] = {nullptr, nullptr};
-            for (auto it = m_head; it != m_tail; it = it->m_next) {
+            for (auto it = m_head; it; it = it->m_next) {
                 if (it->m_storage.size() > key && it->m_storage[key] != nullptr) {
                     if (cleanup) storage.push_back(it->m_storage[key]);
                     it->m_storage[key] = nullptr;

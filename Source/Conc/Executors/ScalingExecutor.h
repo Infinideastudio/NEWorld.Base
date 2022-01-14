@@ -17,6 +17,8 @@ namespace Internal::Executor {
 
         ~ScalingExecutor() {
             Enqueue([this]()noexcept {
+                printf("Task final\n");
+                fflush(stdout);
                 // notify the underlying queue to join all non-executor que
                 mDrainer.Finalize();
                 // tell the executors that they should join after finishing whatever they are doing
