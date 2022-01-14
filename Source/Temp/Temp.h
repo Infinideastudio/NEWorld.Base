@@ -87,7 +87,8 @@ namespace temp {
         template<class T>
         struct destruct_a {
             void operator()(T *ptr) noexcept {
-                allocator_destruct(internal::get_alloc<T>(), ptr, 1);
+                auto alloc = internal::get_alloc<T>();
+                allocator_destruct(alloc, ptr);
             }
         };
 
@@ -117,7 +118,8 @@ namespace temp {
 
     template<class T, class... Ts, std::enable_if_t<!std::is_array_v<T>, int> = 0>
     unique_ptr<T> make_unique(Ts &&... args) {
-        return unique_ptr<T>(allocator_construct<T>(internal::get_alloc<T>(), std::forward<Ts>(args)...));
+        auto alloc = internal::get_alloc<T>();
+        return unique_ptr<T>(allocator_construct<T>(alloc, std::forward<Ts>(args)...));
     }
 
     template<class T, std::enable_if_t<std::is_array_v<T> && std::extent_v<T> == 0, int> = 0>

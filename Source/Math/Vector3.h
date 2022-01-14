@@ -134,8 +134,6 @@ struct Vec3 {
 
     [[nodiscard]] T Length() const noexcept { return std::sqrt(LengthSquared()); }
 
-    operator bvh::Vector3<T>() const { return bvh::Vector3<T>(X, Y, Z); }
-
     void Normalize() noexcept { (*this) /= Length(); }
 };
 
