@@ -34,3 +34,7 @@
 # CLion Compile Outs
 .idea
 cmake-*
+
+# Visual Studio Build Files
+.vs
+out

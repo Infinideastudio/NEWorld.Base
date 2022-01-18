@@ -1,7 +1,7 @@
 #include <mutex>
 #include "FifoQueue.h"
 #include "Internal/Semaphore.h"
-#include "Conc/Executor.h"
+#include "Executor.hpp"
 
 std::shared_ptr<IExecutor> CreateSingleThreadExecutor() {
     class Executor final : public IExecutor {
@@ -9,7 +9,9 @@ std::shared_ptr<IExecutor> CreateSingleThreadExecutor() {
         Executor() :
                 IExecutor(static_cast<FnEnqueue>(&Executor::EnqueueRawImpl)),
                 mRunning(true), mThread([this]()noexcept {
+
             while (mRunning) {
+                gExecutor = this;
                 DoWorks();
                 if (mRunning) Rest();
             }

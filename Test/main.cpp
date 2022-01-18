@@ -1,18 +1,25 @@
 #include "Conc/Executor.h"
+#include "Coro/Async.h"
+
+std::atomic_int counter{ 0 };
+
+ValueAsync<void> Work(IExecutor* next, int count = rand()) {
+    co_await SwitchTo(next);
+    volatile int ans = 0;
+    const auto time = rand() % 10000;
+    for (int i = 0; i < time; i++) ans += 42;
+    (void)ans;
+    const auto result = counter.fetch_add(1);
+    co_return;
+}
 
 int main() {
-    std::atomic_int counter{0};
     {
-        auto exec = CreateScalingBagExecutor(1, 6, 0);
+        auto exec = CreateScalingBagExecutor(1, 6, 1000);
         puts("start enqueue");
         for (int i = 0; i < 5000000; ++i) {
-            exec->Enqueue([&counter]() {
-                /*volatile int ans;
-                for (int i = 0; i < 100000; i++) ans = 42;
-                (void)ans;*/
-                const auto result = counter.fetch_add(1);
-                if (result % 100000 == 99999) printf("%d\n", result + 1);
-            });
+            srand(42);
+            Work(exec.get());
         }
         puts("done enqueue");
     }

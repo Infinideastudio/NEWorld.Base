@@ -1,7 +1,7 @@
 #pragma once
 
 #include "QueueDrain.h"
-#include "Conc/Executor.h"
+#include "Executor.hpp"
 #include "Internal/Semaphore.h"
 
 namespace Internal::Executor {
@@ -64,6 +64,7 @@ namespace Internal::Executor {
 
         void Spawn() {
             std::thread([this]()noexcept {
+                gExecutor = this;
                 do {
                     mDrainer.Drain();
                     if (mRun) continue;

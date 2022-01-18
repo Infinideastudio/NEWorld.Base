@@ -57,6 +57,8 @@ protected:
     FnEnqueue EnqueueRaw;
 };
 
+IExecutor* CurrentExecutor();
+
 std::shared_ptr<IExecutor> CreateSingleThreadExecutor();
 
 std::shared_ptr<IExecutor> CreateScalingFIFOExecutor(int min, int max, int linger);
