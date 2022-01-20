@@ -17,3 +17,6 @@ public:
 private:
     IExecutor* mNext;
 };
+
+template <class Container> 
+ValueAsync<void> AwaitAll(Container&& c) { for (auto&& x : c) co_await std::move(c); }

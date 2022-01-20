@@ -22,7 +22,7 @@ private:
         while (mLock.load(std::memory_order_relaxed)) { spinner.SpinOnce(); }
     }
 
-    alignas(64) std::atomic_bool mLock = {false};
+    std::atomic_bool mLock = {false};
 };
 
 class Monitor {
@@ -51,5 +51,5 @@ private:
         while (!mLock.load(std::memory_order_relaxed)) { spinner.SpinOnce(); }
     }
 
-    alignas(64) std::atomic_bool mLock = {true};
+    std::atomic_bool mLock = {true};
 };
