@@ -64,7 +64,7 @@ namespace Internal::Executor {
 
         void Spawn() {
             std::thread([this]()noexcept {
-                gExecutor = this;
+                SetCurrentExecutor(this);
                 do {
                     mDrainer.Drain();
                     if (mRun) continue;

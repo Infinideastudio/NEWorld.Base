@@ -11,5 +11,3 @@ std::shared_ptr<IExecutor> CreateScalingBagExecutor(int min, int max, int linger
     using namespace Internal::Executor;
     return std::make_shared<ScalingExecutor<BagQueue>>(min, max, linger);
 }
-
-IExecutor* CurrentExecutor() { return gExecutor; }

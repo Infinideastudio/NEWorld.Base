@@ -11,7 +11,7 @@ std::shared_ptr<IExecutor> CreateSingleThreadExecutor() {
                 mRunning(true), mThread([this]()noexcept {
 
             while (mRunning) {
-                gExecutor = this;
+                SetCurrentExecutor(this);
                 DoWorks();
                 if (mRunning) Rest();
             }

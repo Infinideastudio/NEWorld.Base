@@ -15,7 +15,7 @@ namespace Internal::Coro::Async {
 
         AwaitBase(IExecutor* next) noexcept : mNextExec(next) {}
 
-        bool AllowDirectDispatch() const noexcept { return (mThisExec == mNextExec) || (!mNextExec); }
+        bool AllowDirectDispatch(IExecutor* thisExec) const noexcept { return (thisExec == mNextExec) || (!mNextExec); }
 
         AwaitBase* GetNext() const noexcept { return mNext; }
 
@@ -35,7 +35,7 @@ namespace Internal::Coro::Async {
     protected:
         void SetHandle(std::coroutine_handle<> handle) noexcept { mHandle = handle; }
     private:
-        IExecutor* mThisExec{ CurrentExecutor() }, * mNextExec = mThisExec;
+        IExecutor* mNextExec = CurrentExecutor();
         AwaitBase* mNext{ nullptr };
         std::coroutine_handle<> mHandle{};
     };
@@ -43,12 +43,13 @@ namespace Internal::Coro::Async {
     class SharedStateBase {
     public:
         bool Transit(AwaitBase* next) {
-            if (mReady) { if (next->AllowDirectDispatch()) return false; else return (next->Dispatch(), true); }
+            const auto current = CurrentExecutor();
+            if (mReady) { if (next->AllowDirectDispatch(current)) return false; else return (next->Dispatch(), true); }
             else {
                 std::unique_lock lk{ mContLock };
                 if (mReady) {
                     lk.unlock(); // able to direct dispatch, no need to hold lock.
-                    if (next->AllowDirectDispatch()) return false; else (next->Dispatch(), true);
+                    if (next->AllowDirectDispatch(current)) return false; else (next->Dispatch(), true);
                 }
                 // double checked that we cannot dispatch now, chain it to the tail
                 if (!mHead) mHead = next; else mTail->SetNext(next);

@@ -13,7 +13,7 @@ namespace Coro::ValueAsync::Internal {
 
         AwaitBase(IExecutor* next) noexcept : mNextExec(next) {}
 
-        bool AllowDirectDispatch() const noexcept { return (mThisExec == mNextExec) || (!mNextExec); }
+        bool AllowDirectDispatch(IExecutor* thisExec) const noexcept { return (thisExec == mNextExec) || (!mNextExec); }
 
         // Note: this call will invalidate "this"
         void Dispatch() {
@@ -24,7 +24,7 @@ namespace Coro::ValueAsync::Internal {
     protected:
         void SetHandle(std::coroutine_handle<> handle) noexcept { mHandle = handle; }
     private:
-        IExecutor* mThisExec{ CurrentExecutor() }, * mNextExec = mThisExec;
+        IExecutor* mNextExec = CurrentExecutor();
         std::coroutine_handle<> mHandle{};
     };
 
@@ -32,10 +32,11 @@ namespace Coro::ValueAsync::Internal {
         inline static constexpr AwaitBase* INVALID_PTR = reinterpret_cast<AwaitBase*>(~uintptr_t(0));
     public:
         bool Transit(AwaitBase* next) {
+            const auto current = CurrentExecutor();
             for (;;) {
                 auto val = mNext.load();
                 // if the state has ben finalized then direct dispatch
-                if (val == INVALID_PTR) if (next->AllowDirectDispatch()) return false; else return (next->Dispatch(), true);
+                if (val == INVALID_PTR) if (next->AllowDirectDispatch(current)) return false; else return (next->Dispatch(), true);
                 if (val) std::abort();
                 if (mNext.compare_exchange_weak(val, next)) return true;
             }

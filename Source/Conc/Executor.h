@@ -57,7 +57,7 @@ protected:
     FnEnqueue EnqueueRaw;
 };
 
-IExecutor* CurrentExecutor();
+IExecutor* CurrentExecutor() noexcept;
 
 std::shared_ptr<IExecutor> CreateSingleThreadExecutor();
 

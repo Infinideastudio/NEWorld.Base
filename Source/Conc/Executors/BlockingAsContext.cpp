@@ -8,7 +8,7 @@ public:
     Executor() :
         IExecutor(static_cast<FnEnqueue>(&Executor::EnqueueRawImpl)),
         mRunning(true) {
-        gExecutor = this;
+        SetCurrentExecutor(this);
     }
 
     void Start() {
@@ -16,7 +16,7 @@ public:
             DoWorks();
             if (mRunning) Rest();
         }
-        gExecutor = nullptr;
+        SetCurrentExecutor(nullptr);
     }
 
     void Stop() noexcept { mRunning = false; }
@@ -53,7 +53,7 @@ private:
     }
 
     std::atomic_bool mRunning;
-    Internal::Executor::FifoQueue<Task> mQueue;
+    Internal::Executor::FifoQueue<Task, true> mQueue;
     std::atomic_int mPark{ 0 };
     Semaphore mSignal{};
 };

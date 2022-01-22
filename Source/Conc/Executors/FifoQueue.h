@@ -5,20 +5,22 @@
 #include "Temp/TempQueue.h"
 
 namespace Internal::Executor {
-    template<class Task>
+    template<class Task, bool Fast = false>
     class FifoQueue {
     public:
-        void Add(const Task &t) {
-            std::lock_guard lk{mSpin};
+        void Add(const Task& t) {
+            std::lock_guard lk{ mSpin };
             mTasks.Push(t);
         }
 
         [[nodiscard]] Task Get() noexcept {
             if (auto exec = LockedPop(); exec.Item) return exec;
-            SpinWait spinner{};
-            for (auto i = 0u; i < SpinWait::SpinCountForSpinBeforeWait; ++i) {
-                spinner.SpinOnce();
-                if (auto exec = LockedPop(); exec.Item) return exec;
+            if constexpr (!Fast) {
+                SpinWait spinner{};
+                for (auto i = 0u; i < SpinWait::SpinCountForSpinBeforeWait; ++i) {
+                    spinner.SpinOnce();
+                    if (auto exec = LockedPop(); exec.Item) return exec;
+                }
             }
             return {};
         }
@@ -31,7 +33,7 @@ namespace Internal::Executor {
         TempQueue<Task> mTasks{};
 
         auto LockedPop() {
-            std::lock_guard lk{mSpin};
+            std::lock_guard lk{ mSpin };
             return mTasks.Pop();
         }
     };
