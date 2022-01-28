@@ -1,187 +1,141 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
-#include <exception>
-#include <coroutine>
-#include <Temp/Temp.h>
-#include <Conc/Executor.h>
+#include <Common/ScopeGuard.h>
+#include "Internal.h"
 
 namespace Coro::ValueAsync::Internal {
-    class AwaitBase {
+    using namespace Coro::Internal;
+
+    class StateLifeCycleControl {
+        inline static void *INVALID_PTR = std::bit_cast<void *>(~uintptr_t(0));
     public:
-        AwaitBase() noexcept = default;
-
-        AwaitBase(IExecutor* next) noexcept : mNextExec(next) {}
-
-        bool AllowDirectDispatch(IExecutor* thisExec) const noexcept { return (thisExec == mNextExec) || (!mNextExec); }
-
-        // Note: this call will invalidate "this"
-        void Dispatch() {
-            if (mNextExec) mNextExec->Enqueue([h = mHandle]() noexcept { h.resume(); }); else mHandle.resume();
+        void ClientRelease() {
+            const auto address = mAddress.exchange(INVALID_PTR);
+            if (address) std::coroutine_handle<>::from_address(address).destroy();
         }
 
-        bool await_ready() const noexcept { return false; }
-    protected:
-        void SetHandle(std::coroutine_handle<> handle) noexcept { mHandle = handle; }
+        bool RoutineRelease(std::coroutine_handle<> h) {
+            const auto address = h.address();
+            for (;;) {
+                auto val = mAddress.load();
+                if (val == INVALID_PTR) return false; // client state released, continue final
+                if (mAddress.compare_exchange_weak(val, address)) return true;
+                if (val != INVALID_PTR && val != nullptr) std::abort();
+            }
+        }
     private:
-        IExecutor* mNextExec = CurrentExecutor();
-        std::coroutine_handle<> mHandle{};
+        std::atomic<void*> mAddress{ nullptr };
     };
 
-    class SharedStateBase {
-        inline static constexpr AwaitBase* INVALID_PTR = reinterpret_cast<AwaitBase*>(~uintptr_t(0));
+    class ContinuationControl: public StateLifeCycleControl {
+        inline static AwaitCore *INVALID_PTR = std::bit_cast<AwaitCore *>(~uintptr_t(0));
     public:
-        bool Transit(AwaitBase* next) {
-            const auto current = CurrentExecutor();
+        bool Transit(AwaitCore *next) {
+            const auto exec = CurrentExecutor();
             for (;;) {
                 auto val = mNext.load();
-                // if the state has ben finalized then direct dispatch
-                if (val == INVALID_PTR) if (next->AllowDirectDispatch(current)) return false; else return (next->Dispatch(), true);
+                // if the state has been finalized, direct dispatch
+                if (val == INVALID_PTR) {
+                    if (next->CanExecInPlace(exec)) return false;
+                    return (next->Dispatch(), true);
+                }
                 if (val) std::abort();
                 if (mNext.compare_exchange_weak(val, next)) return true;
             }
         }
 
-        void unhandled_exception() {
-            mException = std::current_exception();
-            Dispatch();
-        }
-
-        void ReleaseOnce() noexcept { if (mRef.fetch_sub(1) == 1) mLife.destroy(); }
-    protected:
-        void SetHandle(std::coroutine_handle<> handle) noexcept { mLife = handle; }
-
-        void Dispatch() { if (auto ths = mNext.exchange(INVALID_PTR); ths) ths->Dispatch(); }
-
-        void GetState() noexcept { if (mException) std::rethrow_exception(mException); }
+        void DispatchContinuation() { if (auto ths = mNext.exchange(INVALID_PTR); ths) ths->Dispatch(); }
     private:
-        std::atomic<AwaitBase*> mNext{ nullptr };
-        std::exception_ptr mException{};
-        std::atomic_int mRef{ 2 };
-        std::coroutine_handle<> mLife{};
+        std::atomic<AwaitCore *> mNext{nullptr};
     };
 
-    template <class T>
-    class SharedState : public SharedStateBase {
-    public:
-        void return_value(T&& expr) {
-            mData = std::move(expr);
-            Dispatch();
-        }
+    struct StateLifeCycleRoutineFinalAwait final {
+        StateLifeCycleControl& Control;
 
-        void return_value(const T& expr) {
-            mData = expr;
-            Dispatch();
-        }
+        [[nodiscard]] constexpr bool await_ready() const noexcept { return false; }
 
-        T Get() {
-            GetState();
-            return std::move(mData);
-        }
-    private:
-        T mData;
+        bool await_suspend(std::coroutine_handle<> h) noexcept { return Control.RoutineRelease(h); }
+
+        constexpr void await_resume() const noexcept {}
     };
 
-    template <>
-    class SharedState<void> : public SharedStateBase {
-    public:
-        void return_void() { Dispatch(); }
+    template<class T>
+    using ValueContinuableValueMedia = ContinuableValueMedia<T, ContinuationControl>;
 
-        void Get() { GetState(); }
+    template<class T>
+    struct ValuePromiseValueMedia : public ValueContinuableValueMedia<T> {
+        template<class ...U>
+        void return_value(U &&... v) { ValueContinuableValueMedia<T>::Set(std::forward<U>(v)...); }
+
+        void unhandled_exception() { ValueContinuableValueMedia<T>::Fail(); }
+    };
+
+    template<>
+    struct ValuePromiseValueMedia<void> : public ValueContinuableValueMedia<void> {
+        void return_void() { ValueContinuableValueMedia<void>::Set(); }
+
+        void unhandled_exception() { ValueContinuableValueMedia<void>::Fail(); }
     };
 }
 
 template<class T>
 class ValueAsync {
-    using State = Coro::ValueAsync::Internal::SharedState<T>;
-public:
-    class Await : public Coro::ValueAsync::Internal::AwaitBase {
+    using Media = Coro::ValueAsync::Internal::ValueContinuableValueMedia<T>;
+    using PromiseMedia = Coro::ValueAsync::Internal::ValuePromiseValueMedia<T>;
+
+    class ValueAwaitCore: Coro::Internal::AwaitCore {
     public:
-        Await(State* state) noexcept : AwaitBase(), mState(state) {}
+        explicit ValueAwaitCore(Media* media): mMedia(media) {}
 
-        Await(State* state, IExecutor* next) noexcept : AwaitBase(next), mState(state) {}
+        ValueAwaitCore(Media* media, IExecutor *next) noexcept: AwaitCore(next), mMedia(media) {}
 
-        Await(Await&& other) noexcept : mState(other.mState) { other.mState = nullptr; }
-
-        Await(const Await& other) = delete;
-
-        Await& operator=(Await&& other) noexcept {
-            this->~Await();
-            mState = other.mState;
-            other.mState = nullptr;
-            return *this;
+        bool Transit(std::coroutine_handle<> h) {
+            SetHandle(h);
+            return mMedia->Transit(this);
         }
 
-        Await& operator=(const Await& other) = delete;
-
-        ~Await() noexcept { if (mState) mState->ReleaseOnce(); }
-
-        bool await_suspend(std::coroutine_handle<> handle) {
-            SetHandle(handle);
-            return mState->Transit(this);
+        T Get() {
+            const auto scope = ScopeGuard([m = mMedia]() noexcept { m->ClientRelease(); });
+            return mMedia->Get();
         }
-
-        T await_resume() { return mState->Get(); }
     private:
-        State* mState;
+        Media* mMedia;
     };
+public:
+    using Await = Coro::Internal::Await<ValueAwaitCore>;
 
-    class promise_type: public State {
-    public:
-        struct NullSuspend {
-            explicit NullSuspend(State& state) noexcept : mState(state) {}
-
-            bool await_ready() const noexcept { return false; }
-
-            void await_suspend(std::coroutine_handle<>) const noexcept { mState.ReleaseOnce(); }
-
-            void await_resume() const noexcept {}
-        private:
-            State& mState;
-        };
-
+    struct promise_type : public PromiseMedia {
         ValueAsync get_return_object() { return ValueAsync(this); }
 
-        auto initial_suspend() noexcept {
-            State::SetHandle(std::coroutine_handle<promise_type>::from_promise(*this));
-            return std::suspend_never{};
-        }
+        constexpr auto initial_suspend() noexcept { return std::suspend_never{}; }
 
-        auto final_suspend() noexcept { return NullSuspend{ *this }; }
+        auto final_suspend() noexcept { return Coro::ValueAsync::Internal::StateLifeCycleRoutineFinalAwait{*this}; }
     };
 
-    ValueAsync(ValueAsync&& other) noexcept : mState(other.mState) { other.mState = nullptr; }
+    constexpr ValueAsync() noexcept = default;
 
-    ValueAsync(const ValueAsync& other) = delete;
+    ValueAsync(ValueAsync &&other) noexcept: mMedia(std::exchange(other.mMedia, nullptr)) {}
 
-    ValueAsync& operator=(ValueAsync&& other) noexcept {
+    ValueAsync(const ValueAsync &other) = delete;
+
+    ValueAsync &operator=(ValueAsync &&other) noexcept {
         this->~ValueAsync();
-        mState = other.mState;
-        other.mState = nullptr;
+        mMedia = std::exchange(other.mMedia, nullptr);
         return *this;
     }
 
-    ValueAsync& operator=(const ValueAsync& other) = delete;
+    ValueAsync &operator=(const ValueAsync &other) = delete;
 
-    ~ValueAsync() noexcept { if (mState) mState->ReleaseOnce(); }
+    ~ValueAsync() noexcept { if (mMedia) { mMedia->ClientRelease(); } }
 
-    auto operator co_await()&& {
-        auto ret = Await(mState);
-        mState = nullptr;
-        return ret;
-    }
+    auto operator co_await()&& { return Await(std::exchange(mMedia, nullptr)); }
 
-    auto operator co_await() const& { static_assert(false, "Copying ValueAsync is Not Allowed"); }
+    auto Configure(IExecutor *next) &&{ return Await(std::exchange(mMedia, nullptr), next); }
 
-    auto Configure(IExecutor* next)&& {
-        auto ret = Await(mState);
-        mState = nullptr;
-        return ret;
-    }
-
-    auto Configure(IExecutor* next) const& { static_assert(false, "Copying ValueAsync is Not Allowed"); }
 private:
-    State* mState;
+    Media *mMedia{nullptr};
 
-    ValueAsync(State* state) noexcept : mState(state) {}
+    explicit ValueAsync(Media *state) noexcept: mMedia(state) {}
 };

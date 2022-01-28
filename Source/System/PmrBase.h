@@ -1,3 +1,5 @@
 #pragma once
 
-struct PmrBase { virtual ~PmrBase() noexcept = default; };
+struct Object {};
+
+struct PmrBase: Object { virtual ~PmrBase() noexcept = default; };

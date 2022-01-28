@@ -2,70 +2,47 @@
 
 #include <mutex>
 #include <memory>
-#include <exception>
-#include <coroutine>
-#include <Temp/Temp.h>
 #include <Conc/SpinLock.h>
-#include <Conc/Executor.h>
+#include "Internal.h"
 
-namespace Internal::Coro::Async {
-    class AwaitBase {
+namespace Coro::Async::Internal {
+    using namespace Coro::Internal;
+
+    class AwaitCoreChained : public AwaitCore {
     public:
-        AwaitBase() noexcept = default;
+        AwaitCoreChained() noexcept = default;
 
-        AwaitBase(IExecutor* next) noexcept : mNextExec(next) {}
+        explicit AwaitCoreChained(IExecutor *next) noexcept: AwaitCore(next) {}
 
-        bool AllowDirectDispatch(IExecutor* thisExec) const noexcept { return (thisExec == mNextExec) || (!mNextExec); }
+        [[nodiscard]] AwaitCoreChained *GetNext() const noexcept { return mNext; }
 
-        AwaitBase* GetNext() const noexcept { return mNext; }
+        AwaitCoreChained *SetNext(AwaitCoreChained *next) noexcept { return mNext = next; }
 
-        AwaitBase* SetNext(AwaitBase* next) noexcept { return mNext = next; }
-
-        // Note: this call will invalidate "this"
-        void Dispatch() {
-            if (mNextExec) mNextExec->Enqueue([h = mHandle]() noexcept { h.resume(); }); else mHandle.resume();
-        }
-
-        bool await_ready() const noexcept {
-            // this function will always return false.
-            // the short-path check will be done in the await_suspend
-            // this is done to make sure that the state transition is properlly handled
-            return false;
-        }
-    protected:
-        void SetHandle(std::coroutine_handle<> handle) noexcept { mHandle = handle; }
     private:
-        IExecutor* mNextExec = CurrentExecutor();
-        AwaitBase* mNext{ nullptr };
-        std::coroutine_handle<> mHandle{};
+        AwaitCoreChained *mNext{nullptr};
     };
 
-    class SharedStateBase {
+    class ContinuationControl {
     public:
-        bool Transit(AwaitBase* next) {
+        bool Transit(AwaitCoreChained *next) {
             const auto current = CurrentExecutor();
-            if (mReady) { if (next->AllowDirectDispatch(current)) return false; else return (next->Dispatch(), true); }
+            if (mReady) { if (next->CanExecInPlace(current)) return false; else return (next->Dispatch(), true); }
             else {
-                std::unique_lock lk{ mContLock };
+                std::unique_lock lk{mContLock};
                 if (mReady) {
                     lk.unlock(); // able to direct dispatch, no need to hold lock.
-                    if (next->AllowDirectDispatch(current)) return false; else (next->Dispatch(), true);
+                    if (next->CanExecInPlace(current)) return false; else return (next->Dispatch(), true);
                 }
-                // double checked that we cannot dispatch now, chain it to the tail
+                // double-checked that we cannot dispatch now, chain it to the tail
                 if (!mHead) mHead = next; else mTail->SetNext(next);
                 mTail = next;
                 return true;
             }
         }
 
-        void UnhandledException() {
-            mException = std::current_exception();
-            Dispatch();
-        }
-    protected:
-        void Dispatch() {
+        void DispatchContinuation() {
             mReady.store(true);
-            std::unique_lock lk{ mContLock };
+            std::unique_lock lk{mContLock};
             auto it = mHead;
             // as the ready flag is set, any other call using the state should not touch the cont chain
             lk.unlock();
@@ -76,104 +53,98 @@ namespace Internal::Coro::Async {
             }
         }
 
-        void GetState() noexcept { if (mException) std::rethrow_exception(mException); }
     private:
-        std::atomic_bool mReady{ false };
+        std::atomic_bool mReady{false};
         Lock<SpinLock> mContLock{};
-        AwaitBase* mHead{ nullptr }, * mTail{ nullptr };
-        std::exception_ptr mException{};
+        AwaitCoreChained *mHead{nullptr}, *mTail{nullptr};
+    };
+
+    template<class T>
+    using SharedContinuableValueMedia = ContinuableValueMedia<T, ContinuationControl>;
+
+    template<class T>
+    using SharedContinuableValueMediaHandle = std::shared_ptr<SharedContinuableValueMedia<T>>;
+
+    template<class T>
+    class PromiseValueMedia {
+    public:
+        explicit PromiseValueMedia(SharedContinuableValueMediaHandle<T> h) noexcept: mHandle(std::move(h)) {}
+
+        template<class ...U>
+        void return_value(U &&... v) { mHandle->Set(std::forward<U>(v)...); }
+
+        void unhandled_exception() { mHandle->Fail(); }
+
+    private:
+        SharedContinuableValueMediaHandle<T> mHandle;
+    };
+
+    template<>
+    class PromiseValueMedia<void> {
+    public:
+        explicit PromiseValueMedia(SharedContinuableValueMediaHandle<void> h) noexcept: mHandle(std::move(h)) {}
+
+        void return_void() { mHandle->Set(); }
+
+        void unhandled_exception() { mHandle->Fail(); }
+
+    private:
+        SharedContinuableValueMediaHandle<void> mHandle;
     };
 }
 
 template<class T>
 class Async {
-    template <class T>
-    class SharedState : public Internal::Coro::Async::SharedStateBase {
+    using State = Coro::Async::Internal::SharedContinuableValueMedia<T>;
+    using StateHandle = Coro::Async::Internal::SharedContinuableValueMediaHandle<T>;
+    using PromiseMedia = Coro::Async::Internal::PromiseValueMedia<T>;
+
+    class FlexAwaitCore : Coro::Async::Internal::AwaitCoreChained {
     public:
-        void Set(T&& expr) {
-            mData = std::move(expr);
-            Dispatch();
-        }
+        explicit FlexAwaitCore(StateHandle state) : mState(state) {}
 
-        void Set(const T& expr) {
-            mData = expr;
-            Dispatch();
-        }
+        FlexAwaitCore(StateHandle state, IExecutor *next) noexcept: AwaitCoreChained(next), mState(state) {}
 
-        T Get() {
-            GetState();
-            return mData; // unfortunately this will always have to be a copy.
-        }
-    private:
-        T mData;
-    };
-
-    template <>
-    class SharedState<void> : public Internal::Coro::Async::SharedStateBase {
-    public:
-        void Set() { Dispatch(); }
-
-        void Get() { GetState(); }
-    };
-
-    using State = SharedState<T>;
-public:
-    class Await : public Internal::Coro::Async::AwaitBase {
-    public:
-        Await(std::shared_ptr<State> state) noexcept : AwaitBase(), mState(std::move(state)) {}
-
-        Await(std::shared_ptr<State> state, IExecutor* next) noexcept : AwaitBase(next), mState(std::move(state)) {}
-
-        bool await_suspend(std::coroutine_handle<> handle) {
-            SetHandle(handle);
+        bool Transit(std::coroutine_handle<> h) {
+            SetHandle(h);
             return mState->Transit(this);
         }
 
-        T await_resume() { return mState->Get(); }
+        T Get() { return mState->GetCopy(); }
+
     private:
-        std::shared_ptr<State> mState;
+        StateHandle mState;
     };
-private:
-    class PromiseBase {
-        static std::shared_ptr<State> make_state() noexcept {
+
+public:
+    using Await = Coro::Internal::Await<FlexAwaitCore>;
+
+    class promise_type : public PromiseMedia {
+        static StateHandle make_state() noexcept {
             auto alloc = temp_alloc<State>{};
             return std::allocate_shared<State>(alloc);
         }
+
     public:
-        Async get_return_object() { return Async(mState); }
+        promise_type() : PromiseMedia(make_state()) {}
 
-        auto initial_suspend() noexcept { return std::suspend_never{}; }
+        Async get_return_object() { return Async(this); }
 
-        auto final_suspend() noexcept { return std::suspend_never{}; }
+        constexpr auto initial_suspend() noexcept { return std::suspend_never{}; }
 
-        void unhandled_exception() { mState->UnhandledException(); }
-    protected:
-        std::shared_ptr<State> mState = make_state();
+        constexpr auto final_suspend() noexcept { return std::suspend_never{}; }
     };
-public:
-    template <class U>
-    struct Promise : PromiseBase {
-        void return_value(const T& expr) { mState->Set(expr); }
-
-        void return_value(T&& expr) { mState->Set(std::move(expr)); }
-    };
-
-    template <>
-    struct Promise<void> : PromiseBase {
-        void return_void() { mState->Set(); }
-    };
-
-    using promise_type = Promise<T>;
 
     auto operator co_await()&& { return Await(std::move(mState)); }
 
     auto operator co_await() const& { return Await(mState); }
 
-    auto Configure(IExecutor* next)&& { return Await(std::move(mState), next); }
+    auto Configure(IExecutor *next) &&{ return Await(std::move(mState), next); }
 
-    auto Configure(IExecutor* next) const& { return Await(mState, next); }
+    auto Configure(IExecutor *next) const &{ return Await(mState, next); }
+
 private:
-    std::shared_ptr<State> mState;
+    StateHandle mState;
 
-    Async(std::shared_ptr<State> state) noexcept : mState(std::move(state)) {}
+    explicit Async(std::shared_ptr<State> state) noexcept: mState(std::move(state)) {}
 };

@@ -8,4 +8,7 @@
 #pragma comment(lib, "ws2_32.lib")
 #undef NOMINMAX
 #undef WIN32_LEAN_AND_MEAN
+#define NW_SYS_NTOS
+#else
+#include <sys/mman.h>
 #endif

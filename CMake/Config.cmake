@@ -16,6 +16,11 @@ if (NOT DEFINED NW_PROJECT_DEFINE)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /source-charset:utf-8")
     endif()
 
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        find_package(GNUCAtomic REQUIRED)
+        link_libraries(${GCCLIBATOMIC_LIBRARY})
+    endif()
+
     # Check IPO Support
     cmake_policy(SET CMP0069 NEW)
     include(CheckIPOSupported)

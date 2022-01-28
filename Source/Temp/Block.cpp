@@ -1,26 +1,45 @@
 #include <mutex>
+#include <cstring>
 #include "Internal/system.h"
 #include "Temp.h"
 
 namespace {
+    // TODO(validate this)
     class block_host {
         // Sys Mem Management operations
         static auto reserve() noexcept {
+#ifdef NW_SYS_NTOS
             return VirtualAlloc(nullptr, g_reserved_address_space, MEM_RESERVE, PAGE_READWRITE);
+#else
+            return mmap(nullptr, g_reserved_address_space, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+#endif
         }
 
         void commit(const uint32_t block) const noexcept {
+#ifdef NW_SYS_NTOS
             VirtualAlloc(reinterpret_cast<LPVOID>(compute_base(block)), g_block_size, MEM_COMMIT, PAGE_READWRITE);
+#else
+            if (mprotect(reinterpret_cast<void *>(compute_base(block)), g_block_size, PROT_READ | PROT_WRITE) == -1) {
+                puts(strerror(errno));
+                fflush(stdout);
+            }
+#endif
         }
 
         void release(const uint32_t block) const noexcept {
+#ifdef NW_SYS_NTOS
             VirtualFree(reinterpret_cast<LPVOID>(compute_base(block)), g_block_size, MEM_DECOMMIT);
+#else
+            mprotect(reinterpret_cast<void *>(compute_base(block)), g_block_size, PROT_NONE);
+            madvise(reinterpret_cast<void *>(compute_base(block)), g_block_size, MADV_DONTNEED);
+#endif
         }
 
     public:
         block_host() noexcept
                 : m_base_address(reinterpret_cast<uintptr_t>(reserve())),
                   m_start_address(block_align(m_base_address)), m_brk(0u), m_alloc(0u) {
+            printf("%lx, %lx\n", m_base_address, m_start_address);
         }
 
         // we do not need to cleanup anything as the OS will release them all on process termination
@@ -47,7 +66,7 @@ namespace {
         std::mutex m_lock;
         static constexpr uintptr_t g_block_size_shl = 22ull;
         static constexpr uintptr_t g_block_size = 1ull << g_block_size_shl;
-        static constexpr uintptr_t g_reserved_address_space = 4ull << 40ull;
+        static constexpr uintptr_t g_reserved_address_space = 4ull << 28ull;
 
         // basic alignment computation
         [[nodiscard]] uintptr_t compute_base(const uint32_t block) const noexcept {

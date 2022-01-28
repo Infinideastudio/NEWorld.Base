@@ -34,7 +34,7 @@ namespace Internal::Executor {
         const int mMin, mMax, mLinger;
         QueueDrain<Queue, Task> mDrainer{};
 
-        void EnqueueRawImpl(Item *o, Entry fn) { Add({o, fn}); }
+        void EnqueueRawImpl(Object *o, TaskFn fn) { Add({o, fn}); }
 
         void Add(const Task &task) {
             mDrainer.Add(task);

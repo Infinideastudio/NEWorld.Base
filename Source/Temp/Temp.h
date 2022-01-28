@@ -3,6 +3,7 @@
 #include <new>
 #include <string>
 #include <cstdint>
+#include <cstddef>
 #include "Common/Memory.h"
 
 namespace internal {

@@ -28,7 +28,6 @@ public:
         return WaitFor(absTime - Clock::now());
     }
 
-
     void Signal() noexcept { aemaphore_signal(handle); }
 private:
     static semaphore_t New() noexcept {
@@ -89,19 +88,41 @@ private:
     }
 };
 
-#elif __has_include(<Semaphore.h>)
-#include <Semaphore.h>
+#elif __has_include(<semaphore.h>)
+
+#include <semaphore.h>
+
 class Semaphore {
 public:
-    Semaphore() noexcept { sem_init(&_Semaphore, 0, 0); }
+    Semaphore() noexcept { sem_init(&mSem, 0, 0); }
 
-    ~Semaphore() noexcept { sem_destroy(&_Semaphore); }
+    ~Semaphore() noexcept { sem_destroy(&mSem); }
 
-    void Wait() noexcept { sem_wait(&_Semaphore); }
+    void Wait() noexcept { sem_wait(&mSem); }
 
-    void Signal() noexcept { sem_post(&_Semaphore); }
+    template<class Rep, class Period>
+    bool WaitFor(const std::chrono::duration<Rep, Period> &relTime) noexcept {
+        return WaitUntil(relTime + std::chrono::system_clock::now());
+    }
+
+    template<class Clock, class Duration>
+    bool WaitUntil(const std::chrono::time_point<Clock, Duration> &absTime) noexcept {
+        const auto spec = Timespec(absTime);
+        return (sem_timedwait(&mSem, &spec) == 0);
+    }
+
+    void Signal() noexcept { sem_post(&mSem); }
+
 private:
-    sem_t _Semaphore;
+    sem_t mSem{};
+
+    template<class Clock, class Duration>
+    timespec Timespec(const std::chrono::time_point<Clock, Duration> &tp) {
+        using namespace std::chrono;
+        auto secs = time_point_cast<seconds>(tp);
+        auto ns = time_point_cast<nanoseconds>(tp) - time_point_cast<nanoseconds>(secs);
+        return timespec{secs.time_since_epoch().count(), ns.count()};
+    }
 };
 
 #else

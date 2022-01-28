@@ -19,7 +19,7 @@ ValueAsync<void> Work(IExecutor* next, int count = rand()) {
     co_return;
 }
 
-/*int main() {
+int main() {
     {
         auto exec = CreateScalingBagExecutor(1, 6, 1000);
         puts("start enqueue");
@@ -30,10 +30,10 @@ ValueAsync<void> Work(IExecutor* next, int count = rand()) {
         puts("done enqueue");
     }
     printf("%d\n", counter.load());
-}*/
+}
 
-int main() {
+/*int main() {
     srand(42);
     BlockingAsContext asCtx{};
     asCtx.Await(Load(rand()));
-}
+}*/

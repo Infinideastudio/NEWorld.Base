@@ -22,7 +22,7 @@ public:
     void Stop() noexcept { mRunning = false; }
 
 private:
-    void EnqueueRawImpl(Item* o, Entry fn) {
+    void EnqueueRawImpl(Object* o, TaskFn fn) {
         mQueue.Add({ o, fn });
         WakeOne();
     }
