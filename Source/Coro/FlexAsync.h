@@ -3,9 +3,9 @@
 #include <mutex>
 #include <memory>
 #include <Conc/SpinLock.h>
-#include "Internal.h"
+#include "CoroDetail.h"
 
-namespace Coro::Async::Internal {
+namespace Coro::FlexAsync::Internal {
     using namespace Coro::Internal;
 
     class AwaitCoreChained : public AwaitCore {
@@ -94,12 +94,12 @@ namespace Coro::Async::Internal {
 }
 
 template<class T>
-class Async {
-    using State = Coro::Async::Internal::SharedContinuableValueMedia<T>;
-    using StateHandle = Coro::Async::Internal::SharedContinuableValueMediaHandle<T>;
-    using PromiseMedia = Coro::Async::Internal::PromiseValueMedia<T>;
+class FlexAsync {
+    using State = Coro::FlexAsync::Internal::SharedContinuableValueMedia<T>;
+    using StateHandle = Coro::FlexAsync::Internal::SharedContinuableValueMediaHandle<T>;
+    using PromiseMedia = Coro::FlexAsync::Internal::PromiseValueMedia<T>;
 
-    class FlexAwaitCore : Coro::Async::Internal::AwaitCoreChained {
+    class FlexAwaitCore : Coro::FlexAsync::Internal::AwaitCoreChained {
     public:
         explicit FlexAwaitCore(StateHandle state) : mState(state) {}
 
@@ -128,7 +128,7 @@ public:
     public:
         promise_type() : PromiseMedia(make_state()) {}
 
-        Async get_return_object() { return Async(this); }
+        FlexAsync get_return_object() { return FlexAsync(this); }
 
         constexpr auto initial_suspend() noexcept { return std::suspend_never{}; }
 
@@ -146,5 +146,5 @@ public:
 private:
     StateHandle mState;
 
-    explicit Async(std::shared_ptr<State> state) noexcept: mState(std::move(state)) {}
+    explicit FlexAsync(std::shared_ptr<State> state) noexcept: mState(std::move(state)) {}
 };

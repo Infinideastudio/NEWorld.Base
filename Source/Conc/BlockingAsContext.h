@@ -21,7 +21,7 @@ public:
 	// item is invalid and will result in undefined behaviour
 	template <class T>
 	void Await(T&& awaitable) {
-		CoAwaitToStop(std::move(awaitable)); // Call a coroutine to await the awaitable which calls Stop() afterwards
+		CoAwaitToStop(std::forward<T>(awaitable)); // Call a coroutine to await the awaitable which calls Stop() afterwards
 		Start();
 	}
 private:
@@ -30,7 +30,7 @@ private:
 
 	template <class T>
 	ValueAsync<void> CoAwaitToStop(T&& awaitable) {
-		co_await std::move(awaitable);
+		co_await std::forward<T>(awaitable);
 		Stop();
 	}
 

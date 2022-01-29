@@ -3,7 +3,7 @@
 #include <atomic>
 #include <memory>
 #include <Common/ScopeGuard.h>
-#include "Internal.h"
+#include "CoroDetail.h"
 
 namespace Coro::ValueAsync::Internal {
     using namespace Coro::Internal;
