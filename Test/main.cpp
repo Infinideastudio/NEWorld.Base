@@ -1,6 +1,7 @@
 #include "Conc/Executor.h"
 #include "Coro/Coro.h"
 #include "Conc/BlockingAsContext.h"
+#include "IO/Block.h"
 
 std::atomic_int counter{ 0 };
 
@@ -19,7 +20,22 @@ ValueAsync<void> Work(IExecutor* next, int count = rand()) {
     co_return;
 }
 
-int main() {
+ValueAsync<void> FileIO() {
+    auto file = co_await IO::OpenBlock("/usr/bin/prime-run", IO::Block::F_READ);
+    char buffer[1001];
+    auto result = co_await file->Read(reinterpret_cast<uintptr_t>(buffer), 1000, 0);
+    if (result.success()) {
+        buffer[result.result()] = 0;
+        puts(buffer);
+    }
+    else {
+        printf("%d\n", result.error());
+    }
+    co_await file->Close();
+}
+
+
+/*int main() {
     {
         auto exec = CreateScalingBagExecutor(1, 6, 1000);
         puts("start enqueue");
@@ -30,10 +46,9 @@ int main() {
         puts("done enqueue");
     }
     printf("%d\n", counter.load());
-}
-
-/*int main() {
-    srand(42);
-    BlockingAsContext asCtx{};
-    asCtx.Await(Load(rand()));
 }*/
+
+int main() {
+    BlockingAsContext asCtx{};
+    asCtx.Await(FileIO());
+}

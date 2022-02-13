@@ -2,7 +2,7 @@
 
 #include "QueueDrain.h"
 #include "Executor.hpp"
-#include "Internal/Semaphore.h"
+#include "System/Semaphore.h"
 
 namespace Internal::Executor {
     template<template<class> class Queue>

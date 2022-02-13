@@ -1,6 +1,6 @@
 #include <mutex>
 #include "FifoQueue.h"
-#include "Internal/Semaphore.h"
+#include "System/Semaphore.h"
 #include "Executor.hpp"
 
 std::shared_ptr<IExecutor> CreateSingleThreadExecutor() {

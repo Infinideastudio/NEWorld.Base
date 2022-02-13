@@ -1,7 +1,7 @@
 #include "Conc/BlockingAsContext.h"
 #include "FifoQueue.h"
 #include "Executor.hpp"
-#include "Internal/Semaphore.h"
+#include "System/Semaphore.h"
 
 class BlockingAsContext::Executor final : public IExecutor {
 public:
