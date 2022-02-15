@@ -12,7 +12,7 @@ namespace IO::Internal {
         static constexpr int QUEUE_DEPTH = 8192;
     public:
         enum Ops {
-            Open, Read, Write, Sync, Close
+            Open, Read, Write, Sync, Close, Send, Recv, SendMsg, RecvMsg, Accept, Connect
         };
 
         struct Await {
@@ -70,6 +70,12 @@ namespace IO::Internal {
             else if constexpr(Op == Ops::Write) io_uring_prep_write(sqe, std::forward<Args>(args)...);
             else if constexpr(Op == Ops::Sync) io_uring_prep_fsync(sqe, std::forward<Args>(args)...);
             else if constexpr(Op == Ops::Close) io_uring_prep_close(sqe, std::forward<Args>(args)...);
+            else if constexpr(Op == Ops::Send) io_uring_prep_send(sqe, std::forward<Args>(args)...);
+            else if constexpr(Op == Ops::Recv) io_uring_prep_recv(sqe, std::forward<Args>(args)...);
+            else if constexpr(Op == Ops::SendMsg) io_uring_prep_sendmsg(sqe, std::forward<Args>(args)...);
+            else if constexpr(Op == Ops::RecvMsg) io_uring_prep_recvmsg(sqe, std::forward<Args>(args)...);
+            else if constexpr(Op == Ops::Accept) io_uring_prep_accept(sqe, std::forward<Args>(args)...);
+            else if constexpr(Op == Ops::Connect) io_uring_prep_connect(sqe, std::forward<Args>(args)...);
             return [&c, sqe](Await *ths) noexcept {
                 io_uring_sqe_set_data(sqe, ths);
                 io_uring_submit(&c.mRing);
