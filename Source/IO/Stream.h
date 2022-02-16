@@ -9,9 +9,9 @@
 namespace IO {
     class Stream : public PmrBase {
     public:
-        virtual ValueAsync<IOResult> Read(uint64_t buffer, uint64_t size) = 0;
+        virtual ValueAsync<IOResult> Read(Buffer buffer) = 0;
 
-        virtual ValueAsync<IOResult> Write(uint64_t buffer, uint64_t size) = 0;
+        virtual ValueAsync<IOResult> Write(Buffer buffer) = 0;
 
         virtual ValueAsync<IOResult> ReadV(Buffer *vec, int count) = 0;
 

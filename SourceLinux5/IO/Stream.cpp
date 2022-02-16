@@ -1,7 +1,7 @@
 #include "IO/Stream.h"
 #include "Uring.h"
 #include "Error.h"
-#include "Temp/Vector.h"
+#include <vector>
 #include <cstring>
 #include <arpa/inet.h>
 
@@ -11,10 +11,10 @@ using Internal::Core;
 namespace {
     class StreamImpl : public Stream {
         template<Core::Ops Op>
-        ValueAsync<IOResult> Simple(uint64_t buffer, uint64_t size) {
+        ValueAsync<IOResult> Simple(Buffer buffer) {
             auto &core = Core::Get();
             core.Lock.Enter();
-            auto action = Core::Create<Op>(core, mFd, reinterpret_cast<void *>(buffer), size, 0);
+            auto action = Core::Create<Op>(core, mFd, buffer.GetMem(), buffer.GetSize(), 0);
             core.Lock.Leave();
             co_return Internal::MapResult(co_await action);
         }
@@ -24,7 +24,7 @@ namespace {
             auto &core = Core::Get();
             std::vector<iovec> mapped{static_cast<size_t>(count)};
             for (auto it = vec, end = vec + count; it < end; ++it) {
-                mapped.push_back({it->Memory, it->Size});
+                mapped.push_back({it->GetMem(), it->GetSize()});
             }
             msghdr message{
                     .msg_name = nullptr, .msg_namelen = 0,
@@ -40,12 +40,12 @@ namespace {
     public:
         explicit StreamImpl(int socket) noexcept: mFd(socket) {}
 
-        ValueAsync<IOResult> Read(uint64_t buffer, uint64_t size) override {
-            return Simple<Core::Recv>(buffer, size);
+        ValueAsync<IOResult> Read(Buffer buffer) override {
+            return Simple<Core::Recv>(buffer);
         }
 
-        ValueAsync<IOResult> Write(uint64_t buffer, uint64_t size) override {
-            return Simple<Core::Send>(buffer, size);
+        ValueAsync<IOResult> Write(Buffer buffer) override {
+            return Simple<Core::Send>(buffer);
         }
 
         ValueAsync<IOResult> ReadV(Buffer *vec, int count) override {
@@ -98,7 +98,7 @@ namespace {
             const auto result = Internal::MapResult(co_await action);
             if (!result.success()) co_return Result{.Stat = result.error()};
             co_return Result{
-                    .Peer = Address::CreateIPv4(reinterpret_cast<std::byte *>(address.sin_addr.s_addr)),
+                    .Peer = Address::CreateIPv4(reinterpret_cast<std::byte *>(&(address.sin_addr.s_addr))),
                     .Handle = std::make_unique<StreamImpl>(result.result())
             };
         }
@@ -118,7 +118,7 @@ namespace {
             const auto result = Internal::MapResult(co_await action);
             if (!result.success()) co_return Result{.Stat = result.error()};
             co_return Result{
-                    .Peer = Address::CreateIPv6(reinterpret_cast<std::byte *>(address.sin6_addr.s6_addr)),
+                    .Peer = Address::CreateIPv6(reinterpret_cast<std::byte *>(&(address.sin6_addr.s6_addr))),
                     .Handle = std::make_unique<StreamImpl>(result.result())
             };
         }
